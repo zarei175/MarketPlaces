@@ -1,18 +1,308 @@
+// مدل داده بازارمه — مبتنی بر طرح نسخه ۲ (بخش ۹.۴)
+// هسته: قیمت هرگز روی کالای مرکزی نیست؛ روی «Offer» است (یک کالا × چند فروشگاه).
+// قاعده مهاجرت‌پذیری: فقط PostgreSQL استاندارد — هیچ قابلیت اختصاصی Supabase استفاده نشود.
+// نام‌گذاری فیزیکی: جداول/ستون‌ها snake_case استاندارد Postgres (با @map/@@map).
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url      = env("DATABASE_URL") // pooled (pgbouncer) — برای اجرای اپ
+  directUrl = env("DIRECT_URL")  // session — برای push/migrate
+}
+
+// ─── کاربران پنل مدیریت ───
+enum AdminRole {
+  ADMIN
+  OPERATOR
+}
+
+model AdminUser {
+  id           Int       @id @default(autoincrement())
+  username     String    @unique
+  passwordHash String    @map("password_hash")
+  role         AdminRole @default(OPERATOR)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("admin_users")
+}
+
+// ─── دسته و برند ───
+enum CategoryKind {
+  STANDARD // کاتالوگ مرکزی با مقایسه چند فروشگاه
+  CUSTOM  // تولیدی/غیراستاندارد — کارت هر فروشگاه جدا
+}
+
+model Category {
+  id        Int          @id @default(autoincrement())
+  name      String
+  slug      String       @unique
+  kind      CategoryKind @default(STANDARD)
+  parentId  Int?         @map("parent_id")
+  parent    Category?    @relation("CatTree", fields: [parentId], references: [id])
+  children  Category[]  @relation("CatTree")
+  icon      String?
+  sortOrder Int          @default(0) @map("sort_order")
+  products  Product[]
+  storeItems StoreItem[]
+
+  @@index([parentId])
+  @@map("categories")
+}
+
+model Brand {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  slug     String    @unique
+  products Product[]
+
+  @@map("brands")
+}
+
+// ─── فروشگاه ───
+enum StoreStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum StorePlan {
+  FREE
+  PRO
+  SPECIAL
+}
+
+model Store {
+  id           Int         @id @default(autoincrement())
+  name         String
+  slug         String      @unique
+  phone        String
+  categoryName String?     @map("category_name") // صنف (متن آزاد)
+  address      String
+  city         String      @default("بندر ماهشهر")
+  lat          Float?
+  lng          Float?
+  workingHours String?     @map("working_hours")
+  logoUrl      String?     @map("logo_url")
+  description  String?
+  status       StoreStatus @default(PENDING)
+  plan         StorePlan   @default(FREE)
+  founder      Boolean     @default(false) // باشگاه بنیان‌گذاران (۳۰ فروشگاه اول)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  users        StoreUser[]
+  offers       Offer[]
+  storeItems   StoreItem[]
+  leads        LeadEvent[]
+
+  @@index([status, city])
+  @@map("stores")
+}
+
+model StoreUser {
+  id         Int      @id @default(autoincrement())
+  storeId    Int      @map("store_id")
+  store      Store    @relation(fields: [storeId], references: [id])
+  mobile     String   @unique
+  role       String   @default("OWNER")
+  baleChatId String?  @map("bale_chat_id") // شناسه چت ربات بله (فاز ربات)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("store_users")
+}
+
+// ─── کالای استاندارد (کاتالوگ مرکزی) ───
+enum ProductStatus {
+  PENDING
+  ACTIVE
 }
 
 model Product {
-  id          Int      @id @default(autoincrement())
-  name        String
-  description String?
-  price       Int      // price in Tomans
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             Int           @id @default(autoincrement())
+  name           String
+  normalizedName String        @map("normalized_name") // یکسان‌سازی فارسی برای جستجو
+  slug           String        @unique
+  categoryId     Int           @map("category_id")
+  category       Category      @relation(fields: [categoryId], references: [id])
+  brandId        Int?          @map("brand_id")
+  brand          Brand?        @relation(fields: [brandId], references: [id])
+  specs          Json?
+  imageUrl       String?       @map("image_url")
+  status         ProductStatus @default(PENDING)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  offers         Offer[]
+
+  @@index([categoryId, status])
+  @@map("products")
 }
 
+// ─── کالای غیراستاندارد (تولیدی‌ها) — کارت مستقل هر فروشگاه ───
+enum Availability {
+  IN_STOCK
+  OUT_OF_STOCK
+  CALL
+}
+
+model StoreItem {
+  id             Int          @id @default(autoincrement())
+  storeId        Int          @map("store_id")
+  store          Store        @relation(fields: [storeId], references: [id])
+  categoryId     Int          @map("category_id")
+  category       Category     @relation(fields: [categoryId], references: [id])
+  name           String
+  normalizedName String       @map("normalized_name")
+  description    String?
+  imageUrl       String?      @map("image_url")
+  price          Int
+  availability   Availability @default(IN_STOCK)
+  lastConfirmedAt DateTime     @default(now()) @map("last_confirmed_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@index([storeId, categoryId])
+  @@map("store_items")
+}
+
+// ─── Offer: قیمت یک کالا در یک فروشگاه (هسته سامانه) ───
+enum OfferSource {
+  OPERATOR
+  PANEL
+  ROBOT
+  EXCEL
+  PHOTO
+}
+
+model Offer {
+  id              Int          @id @default(autoincrement())
+  productId       Int          @map("product_id")
+  product         Product      @relation(fields: [productId], references: [id])
+  storeId         Int          @map("store_id")
+  store           Store        @relation(fields: [storeId], references: [id])
+  price           Int // تومان
+  availability    Availability @default(IN_STOCK)
+  note            String? // رنگ/گارانتی
+  source          OfferSource  @default(OPERATOR)
+  lastConfirmedAt DateTime     @default(now()) @map("last_confirmed_at") // تأیید ≠ ویرایش (نکته نسخه ۲)
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  history         PriceHistory[]
+  leads           LeadEvent[]
+  reports         IssueReport[]
+
+  @@unique([productId, storeId])
+  @@index([storeId])
+  @@index([lastConfirmedAt])
+  @@map("offers")
+}
+
+model PriceHistory {
+  id           Int         @id @default(autoincrement())
+  offerId      Int         @map("offer_id")
+  offer        Offer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  price        Int
+  availability Availability
+  at           DateTime    @default(now())
+
+  @@index([offerId, at])
+  @@map("price_history")
+}
+
+// ─── رویدادها ───
+enum LeadType {
+  CALL
+  DIRECTIONS
+  VIEW_CONTACT
+}
+
+model LeadEvent {
+  id        Int      @id @default(autoincrement())
+  offerId   Int?     @map("offer_id")
+  offer     Offer?   @relation(fields: [offerId], references: [id])
+  storeId   Int      @map("store_id")
+  store     Store    @relation(fields: [storeId], references: [id])
+  type      LeadType
+  ipHash    String?  @map("ip_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([storeId, createdAt])
+  @@index([offerId])
+  @@map("lead_events")
+}
+
+model SearchLog {
+  id           Int      @id @default(autoincrement())
+  query        String
+  normalized   String
+  resultsCount Int      @map("results_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([normalized])
+  @@index([createdAt])
+  @@map("search_logs")
+}
+
+enum IssueType {
+  WRONG_PRICE
+  OUT_OF_STOCK
+  OTHER
+}
+
+enum IssueStatus {
+  OPEN
+  RESOLVED
+}
+
+model IssueReport {
+  id          Int         @id @default(autoincrement())
+  offerId     Int?        @map("offer_id")
+  offer       Offer?      @relation(fields: [offerId], references: [id])
+  storeItemId Int?        @map("store_item_id") // خطا روی کالای تولیدی
+  type        IssueType
+  note        String?
+  status      IssueStatus @default(OPEN)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  resolvedAt  DateTime?   @map("resolved_at")
+
+  @@index([status, createdAt])
+  @@map("issue_reports")
+}
+
+// ─── OTP فروشندگان ───
+model OtpCode {
+  id         Int       @id @default(autoincrement())
+  mobile     String
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([mobile, createdAt])
+  @@map("otp_codes")
+}
+
+// ─── تنظیمات و لاگ ممیزی ───
+model Setting {
+  key   String @id
+  value String
+
+  @@map("settings")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  actorType String   @map("actor_type") // ADMIN | OPERATOR | STORE | SYSTEM
+  actorRef  String?  @map("actor_ref") // نام کاربری یا موبایل
+  action    String
+  entity    String
+  entityId  Int?     @map("entity_id")
+  detail    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}

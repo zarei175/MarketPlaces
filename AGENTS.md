@@ -22,4 +22,10 @@
 
 ## خطاهای پرتکرار (هرگز تکرار نکن)
 
-(با اولین خطای واقعی این پروژه پر می‌شود)
+- **اتصال Supabase فقط از session pooler پورت ۵۴۳۲.** پورت ۶۵۴۳ (transaction) از شبکه ایران ناپایدار است (P1017/P1001). handshake از ایران تا ۴۱ ثانیه طول کشیده → `connect_timeout=60` در URL الزامی است.
+- **`prisma db push`/`migrate dev` روی Supabase از این شبکه شکست می‌خورد** (schema engine به host نمی‌رسد): به‌جایش `prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/init.sql` و اجرای فایل با psycopg2 (یا `prisma db execute` روی session URL).
+- **هر فایل Server Action باید خط اولش `'use server' باشد**؛ وگرنه در runtime خطای «Functions cannot be passed to Client Components».
+- **پارامتر dynamic segment فارسی را با `decodeURIComponent` ایمن decode کن** (صفحات product/store/category نمونه دارند) — وگرنه 404.
+- **در `slugifyFa` خط تیره باید در بازه مجاز بماند** (`[^a-z0-9\u0600-\u06FF -]`) — وگرنه کلمات در slug می‌چسبند.
+- **جداول فیزیکی snake_case با `@map`/`@@map`** — SQL خام (pg_trgm، ایندکس‌ها) باید lowercase بنویسد.
+- `typedRoutes` فعال است → href داینامیک `Link` باید نوع `Route` بگیرد.
