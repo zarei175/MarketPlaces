@@ -9,6 +9,11 @@
 - رابط فارسی RTL است (`lang="fa" dir="rtl"`) — منبع: src/app/layout.tsx
 - API فعلی: `GET/POST /api/products` — منبع: src/app/api/products/route.ts
 
+## زیرساخت
+- پروژه Supabase «MarketPlaces» — ref: krdnkfssdqdllbwnraup، region: ap-northeast-1 (توکیو)، PostgreSQL 17، ساخته 2026-10-15 — منبع: Supabase Management API
+- هاست قدیمی دیتابیس (`db.<ref>.supabase.co`) در DNS رزولوت نمی‌شود (پروژه‌های جدید Supabase)؛ اتصال فقط از طریق pooler: session پورت ۵۴۳۲ (تست موفق 2026-10-15)؛ transaction پورت ۶۵۴۳ از این شبکه TCP باز ولی handshake کند — منبع: تست‌های اتصال 2026-10-15
+- همه کلیدها/توکن‌ها (Supabase: access token و anon/service_role؛ کاوه‌نگار؛ رمز DB) فقط در `.env` محلی هستند و به مخزن پوش نمی‌شوند — منبع: .gitignore + بررسی git status 2026-10-15
+
 ## کسب‌وکار
 - هدف پروژه: پلتفرم مقایسه قیمت فروشگاه‌ها/تولیدی‌های شهرستان ماهشهر، کارکردی مشابه torob.com — منبع: prompt.txt (2026-10-15)
 - منبع درآمد: فروشگاه‌های متصل به سامانه؛ مدل دقیق باید در PLAN.md پیشنهاد و پس از تأیید کاربر قطعی شود — منبع: prompt.txt بند ۳
